@@ -1,0 +1,86 @@
+---
+- name: Ensure group "{{ sonar_group }}" exists
+  group:
+    name: "{{ sonar_group }}"
+    state: present
+
+- name: Ensure user "{{ sonar_user}}" exists
+  user:
+    name: "{{ sonar_user }}"
+    comment:  User "{{ sonar_user }} just for running sonar service"
+    group: "{{ sonar_group }}"
+
+- name: Download Sonar version "{{ sonar_version }}"
+  get_url:
+    url: "{{ sonar_download_url }}"
+    dest: "{{ workspace }}/{{ sonar_version_directory }}.zip"
+    validate_certs: "{{ sonar_download_validate_certs }}"
+
+- name: Unzip Sonar.
+  unarchive:
+    src: "{{ workspace }}/{{ sonar_version_directory }}.zip"
+    dest: /usr/local/
+    copy: false
+    creates: /usr/local/sonar/COPYING
+
+- name: Move Sonar into place
+  command: >
+    mv /usr/local/{{ sonar_version_directory }} /usr/local/sonar
+    creates=/usr/local/sonar/COPYING
+
+- name: Make user "{{ sonar_user }}" owner
+  file:
+    path: /usr/local/sonar
+    owner: "{{ sonar_user }}"
+    group: "{{ sonar_group }}"
+    recurse: yes
+
+- include: mysql_configure.yml
+  when: sonar_jdbc_driver == "mysql"
+
+- include: pgsql_configure.yml
+  when: sonar_jdbc_driver == "postgresql"
+
+- name: Ensure file descriptor has rigth value
+  sysctl:
+    name: vm.max_map_count
+    value: "262144"
+    state: present
+    reload: yes
+  notify: reboot server
+
+- name: Symlink sonar bin.
+  file:
+    src: /usr/local/sonar/bin/linux-x86-64/sonar.sh
+    dest: /usr/bin/sonar
+    state: link
+  register: sonar_symlink
+
+- name: Add sonar as init script for service management.
+  file:
+    src: /usr/local/sonar/bin/linux-x86-64/sonar.sh
+    dest: /etc/init.d/sonar
+    state: link
+  when: "ansible_service_mgr != 'systemd'"
+
+- name: Copy SonarQube systemd unit file into place (for systemd systems).
+  template:
+    src: sonar.unit.j2
+    dest: /etc/systemd/system/sonar.service
+    owner: root
+    group: root
+    mode: 0755
+  when: "ansible_service_mgr == 'systemd'"
+
+- name: Ensure Sonar is running and set to start on boot.
+  service: name=sonar state=started enabled=yes
+
+- meta: flush_handlers
+
+# - name: Allow Sonar time to build on first start.
+#   pause: seconds=180
+#   when: sonar_symlink.changed
+#   tags: ['skip_ansible_lint']
+
+- name: Make sure Sonar is responding on the configured port.
+  wait_for: port=9000 delay=3 timeout=300

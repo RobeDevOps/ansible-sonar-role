@@ -1,0 +1,29 @@
+---
+- name: Create a postgresql database "{{ sonar_pgsql_database }}".
+  postgresql_db:
+    name: "{{ sonar_pgsql_database }}"
+    state: present
+    login_host: "{{ sonar_pgsql_host }}"
+
+- name:  Create pgsql user "{{ sonar_pgsql_username }}"
+  postgresql_user:
+    db: "{{ sonar_pgsql_database }}"
+    name: " {{ sonar_pgsql_username }}"
+    password: "{{ sonar_pgsql_password }}"
+    expires: infinity
+
+- name: Configure SonarQube JDBC settings for PSQL.
+  lineinfile:
+    dest: /usr/local/sonar/conf/sonar.properties
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  notify: restart sonar
+  with_items:
+    - regexp: "^sonar.jdbc.username"
+      line: "sonar.jdbc.username={{ sonar_pgsql_username }}"
+    - regexp: "^sonar.jdbc.password"
+      line: "sonar.jdbc.password={{ sonar_pgsql_password }}"
+    - regexp: "^sonar.jdbc.url"
+      line: "sonar.jdbc.url=jdbc:{{ sonar_jdbc_driver }}://{{ sonar_pgsql_host }}/{{ sonar_pgsql_database }}"
+    - regexp: "^sonar.web.context"
+      line: "sonar.web.context={{ sonar_web_context }}"
